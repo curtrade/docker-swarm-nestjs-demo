@@ -1,5 +1,5 @@
 # Часть 3 — наблюдаемость. = Часть 2 (secrets) + Prometheus + Grafana + cAdvisor
-# + node-exporter. Состояние step-10.
+# + node-exporter + Loki + Promtail. Состояние step-11.
 #
 # Подготовка:
 #   bash deploy/traefik/certs/generate-cert.sh
@@ -201,6 +201,38 @@ services:
       restart_policy:
         condition: on-failure
 
+  # Хранилище логов.
+  loki:
+    image: grafana/loki:3.1.1
+    command: ['-config.file=/etc/loki/loki-config.yml']
+    networks: [appnet]
+    configs:
+      - source: loki_config
+        target: /etc/loki/loki-config.yml
+    volumes:
+      - loki-data:/loki
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+
+  # Сбор логов контейнеров — глобальный агент (по одному на узел).
+  promtail:
+    image: grafana/promtail:3.1.1
+    command: ['-config.file=/etc/promtail/promtail-config.yml']
+    networks: [appnet]
+    configs:
+      - source: promtail_config
+        target: /etc/promtail/promtail-config.yml
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    deploy:
+      mode: global
+      restart_policy:
+        condition: on-failure
+
 networks:
   appnet:
     driver: overlay
@@ -210,6 +242,7 @@ volumes:
   pg-data:
   prometheus-data:
   grafana-data:
+  loki-data:
 
 configs:
   app_env:
@@ -226,6 +259,10 @@ configs:
     file: ../grafana/provisioning/dashboards/dashboards.yml
   grafana_dashboard_app:
     file: ../grafana/dashboards/app-overview.json
+  loki_config:
+    file: ../loki/loki-config.yml
+  promtail_config:
+    file: ../loki/promtail-config.yml
 
 secrets:
   db_password:
