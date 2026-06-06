@@ -19,7 +19,10 @@ npm-debug.log*
 deploy/**/secrets/*
 *.key
 *.pem
+# Сгенерированные сертификаты не коммитим, но скрипт и README — да.
+deploy/traefik/certs/*
 !deploy/traefik/certs/README.md
+!deploy/traefik/certs/generate-cert.sh
 
 # editors / os
 .DS_Store

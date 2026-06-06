@@ -1,0 +1,11 @@
+# Динамическая конфигурация Traefik: привязка self-signed сертификата.
+# Подаётся в Traefik как Swarm config (см. stack.part1.yml -> configs).
+tls:
+  certificates:
+    - certFile: /certs/local.crt
+      keyFile: /certs/local.key
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /certs/local.crt
+        keyFile: /certs/local.key

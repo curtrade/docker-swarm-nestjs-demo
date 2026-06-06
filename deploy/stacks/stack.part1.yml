@@ -1,41 +1,94 @@
 # Часть 1 — стек Swarm. Эволюционирует от главы к главе (step-03 … step-07).
-# Состояние step-05: + Redis как общее состояние для всех реплик api.
-# Деплой:  docker stack deploy -c deploy/stacks/stack.part1.yml part1
+# Состояние step-06: + Traefik как ingress (L7) с self-signed TLS.
+# Перед деплоем сгенерируй сертификат: bash deploy/traefik/certs/generate-cert.sh
+# Деплой:  docker stack deploy --resolve-image=never -c deploy/stacks/stack.part1.yml part1
 version: '3.9'
 
 services:
   api:
-    # Образ собираем локально (см. главу 02). На одном узле он доступен сразу;
-    # для нескольких узлов в Части 4 появится registry.
     image: swarm-demo-api:dev
     networks:
       - appnet
-    ports:
-      # Публикация через ingress-сеть Swarm (routing mesh): запрос на порт
-      # любого узла попадёт на одну из реплик.
-      - target: 3000
-        published: 3000
-        protocol: tcp
-        mode: ingress
+    # Порт наружу больше НЕ публикуем — входной трафик идёт через Traefik.
     environment:
       PORT: '3000'
       APP_VERSION: '1.0.0'
-      # Имя сервиса redis резолвится через DNS overlay-сети.
       REDIS_URL: 'redis://redis:6379'
     deploy:
       replicas: 3
       restart_policy:
         condition: on-failure
+      # В Swarm-режиме Traefik читает labels из deploy.labels (не из верхнего level).
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.api.rule=Host(`localhost`)
+        - traefik.http.routers.api.entrypoints=websecure
+        - traefik.http.routers.api.tls=true
+        # На какой порт контейнера слать трафик.
+        - traefik.http.services.api.loadbalancer.server.port=3000
 
   redis:
     image: redis:7-alpine
     networks:
       - appnet
-    # Порт наружу не публикуем — Redis доступен только внутри overlay-сети.
     volumes:
       - redis-data:/data
     deploy:
       replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  traefik:
+    # v3.6.x: swarm-провайдер корректно договаривается о версии Docker API
+    # (нужно для Docker 28+, где минимальный API 1.40). В v3.1 и в v3.7.x —
+    # баг "client version 1.24 is too old": провайдер не видит сервисы Swarm.
+    image: traefik:v3.6.20
+    command:
+      # Swarm-провайдер: Traefik читает сервисы и их labels из Swarm API.
+      - --providers.swarm=true
+      - --providers.swarm.endpoint=unix:///var/run/docker.sock
+      - --providers.swarm.exposedByDefault=false
+      - --providers.swarm.network=part1_appnet
+      # Файловый провайдер для динамической конфигурации (TLS).
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
+      # Точки входа: 80 -> редирект на 443; 443 — TLS.
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entryPoint.to=websecure
+      - --entrypoints.web.http.redirections.entryPoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      # Дашборд (insecure :8080) — только для обучения.
+      - --api.dashboard=true
+      - --api.insecure=true
+      - --log.level=INFO
+    ports:
+      - target: 80
+        published: 80
+        mode: ingress
+      - target: 443
+        published: 443
+        mode: ingress
+      - target: 8080
+        published: 8080
+        mode: ingress
+    networks:
+      - appnet
+    volumes:
+      # Traefik читает Swarm API через docker socket (только чтение).
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    configs:
+      - source: traefik_dynamic
+        target: /etc/traefik/dynamic/tls.yml
+      - source: traefik_cert
+        target: /certs/local.crt
+    secrets:
+      - source: traefik_key
+        target: /certs/local.key
+    deploy:
+      # Traefik должен быть на менеджере, чтобы читать Swarm API.
+      placement:
+        constraints:
+          - node.role == manager
       restart_policy:
         condition: on-failure
 
@@ -45,3 +98,15 @@ networks:
 
 volumes:
   redis-data:
+
+# Swarm configs/secrets читаются docker CLI из путей относительно ЭТОГО файла
+# на момент деплоя и отправляются в кластер (на узлы бинды не нужны).
+configs:
+  traefik_dynamic:
+    file: ../traefik/dynamic/tls.yml
+  traefik_cert:
+    file: ../traefik/certs/local.crt
+
+secrets:
+  traefik_key:
+    file: ../traefik/certs/local.key
