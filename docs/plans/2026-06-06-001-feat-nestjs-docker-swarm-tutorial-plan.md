@@ -1,7 +1,7 @@
 ---
 title: "feat: Учебный проект NestJS + Docker Swarm (пошагово, с best practices)"
 type: feat
-status: active
+status: completed
 date: 2026-06-06
 origin: docs/brainstorms/nestjs-docker-swarm-tutorial-requirements.md
 ---
