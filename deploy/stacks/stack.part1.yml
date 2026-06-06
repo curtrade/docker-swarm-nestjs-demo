@@ -1,5 +1,5 @@
 # Часть 1 — стек Swarm. Эволюционирует от главы к главе (step-03 … step-07).
-# Состояние step-03: один сервис api, overlay-сеть, одна реплика.
+# Состояние step-04: сервис api масштабирован до 3 реплик за routing mesh.
 # Деплой:  docker stack deploy -c deploy/stacks/stack.part1.yml part1
 version: '3.9'
 
@@ -21,7 +21,7 @@ services:
       PORT: '3000'
       APP_VERSION: '1.0.0'
     deploy:
-      replicas: 1
+      replicas: 3
       restart_policy:
         condition: on-failure
 
