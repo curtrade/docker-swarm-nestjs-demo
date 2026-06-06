@@ -1,6 +1,6 @@
 # Часть 4 (capstone) — полный стек на МНОГОУЗЛОВОМ кластере.
 # = Часть 3 + registry; образ api тянется из registry (доступен всем узлам).
-# Состояние нарастает: step-13 (registry) -> step-14 (placement) -> step-16 (финал).
+# Состояние step-14: + placement (stateful закреплены на узле, api распределён).
 #
 # Подготовка (на менеджере кластера, см. главы 12-13):
 #   export REGISTRY=<MANAGER_IP>:5000
@@ -64,6 +64,10 @@ services:
         order: start-first
         failure_action: rollback
         monitor: 15s
+      # Распределяем реплики api по узлам кластера (а не кучей на одном).
+      placement:
+        preferences:
+          - spread: node.id
       labels:
         - traefik.enable=true
         - traefik.http.routers.api.rule=Host(`localhost`)
@@ -78,6 +82,11 @@ services:
       - redis-data:/data
     deploy:
       replicas: 1
+      # Stateful-сервис с node-local volume: закрепляем на конкретном узле,
+      # иначе при переезде на другой узел данные «потеряются».
+      placement:
+        constraints:
+          - node.role == manager
       restart_policy:
         condition: on-failure
 
@@ -95,6 +104,10 @@ services:
       - pg-data:/var/lib/postgresql/data
     deploy:
       replicas: 1
+      # Закрепляем БД на узле с её данными (node-local volume).
+      placement:
+        constraints:
+          - node.role == manager
       restart_policy:
         condition: on-failure
 
