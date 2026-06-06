@@ -1,15 +1,18 @@
+import { ConfigifyModule } from '@itgorillaz/configify';
 import { Module } from '@nestjs/common';
+import { HealthController } from './health/health.controller';
+import { ObservabilityController } from './observability/observability.controller';
 
 /**
- * Корневой модуль приложения.
+ * Корневой модуль.
  *
- * На шаге step-00 он пустой — это чистый каркас. По мере прохождения курса
- * сюда подключаются модули наблюдаемости, конфигурации, общего состояния,
- * ресурса notes и т.д. Смотри главы в docs/chapters/.
+ * ConfigifyModule.forRootAsync() подключает типизированный конфиг и
+ * авто-обнаруживает все @Configuration()-классы (AppConfiguration и др.).
+ * По мере курса сюда добавятся модули общего состояния, notes, метрик и т.д.
  */
 @Module({
-  imports: [],
-  controllers: [],
+  imports: [ConfigifyModule.forRootAsync()],
+  controllers: [ObservabilityController, HealthController],
   providers: [],
 })
 export class AppModule {}

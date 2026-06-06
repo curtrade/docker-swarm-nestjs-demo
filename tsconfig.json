@@ -18,6 +18,10 @@
     "strictBindCallApply": true,
     "forceConsistentCasingInFileNames": true,
     "noFallthroughCasesInSwitch": true,
+    // Осознанно отключено (глобальный компромисс): @itgorillaz/configify
+    // заполняет @Value()-свойства в рантайме через reflection, поэтому строгая
+    // проверка инициализации ругалась бы на них. Альтернатива без глобального
+    // ослабления — @RequiredArgsConstructor() на каждом конфиг-классе.
     "strictPropertyInitialization": false
   }
 }
