@@ -1,0 +1,15 @@
+# Локальная разработка — ДО Docker Swarm.
+# Это обычный docker compose: один сервис, один контейнер. Swarm появится
+# в главе 03. Запуск:  docker compose -f deploy/compose/docker-compose.yml up --build
+services:
+  api:
+    build:
+      # Контекст сборки — корень репозитория (Dockerfile лежит там).
+      context: ../..
+      dockerfile: Dockerfile
+    image: swarm-demo-api:dev
+    ports:
+      - '3000:3000'
+    environment:
+      PORT: '3000'
+      APP_VERSION: 'compose-dev'
