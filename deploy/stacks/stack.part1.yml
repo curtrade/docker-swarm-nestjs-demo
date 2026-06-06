@@ -1,0 +1,30 @@
+# Часть 1 — стек Swarm. Эволюционирует от главы к главе (step-03 … step-07).
+# Состояние step-03: один сервис api, overlay-сеть, одна реплика.
+# Деплой:  docker stack deploy -c deploy/stacks/stack.part1.yml part1
+version: '3.9'
+
+services:
+  api:
+    # Образ собираем локально (см. главу 02). На одном узле он доступен сразу;
+    # для нескольких узлов в Части 4 появится registry.
+    image: swarm-demo-api:dev
+    networks:
+      - appnet
+    ports:
+      # Публикация через ingress-сеть Swarm (routing mesh): запрос на порт
+      # любого узла попадёт на одну из реплик.
+      - target: 3000
+        published: 3000
+        protocol: tcp
+        mode: ingress
+    environment:
+      PORT: '3000'
+      APP_VERSION: '1.0.0'
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+networks:
+  appnet:
+    driver: overlay
