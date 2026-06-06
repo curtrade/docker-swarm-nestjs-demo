@@ -1,5 +1,5 @@
 # Часть 1 — стек Swarm. Эволюционирует от главы к главе (step-03 … step-07).
-# Состояние step-06: + Traefik как ingress (L7) с self-signed TLS.
+# Состояние step-07: + healthcheck, лимиты ресурсов, rolling update с rollback.
 # Перед деплоем сгенерируй сертификат: bash deploy/traefik/certs/generate-cert.sh
 # Деплой:  docker stack deploy --resolve-image=never -c deploy/stacks/stack.part1.yml part1
 version: '3.9'
@@ -14,10 +14,42 @@ services:
       PORT: '3000'
       APP_VERSION: '1.0.0'
       REDIS_URL: 'redis://redis:6379'
+    # Healthcheck: Swarm считает задачу готовой только когда /health отвечает.
+    # busybox wget есть в alpine-образе. Это условие готовности для start-first.
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:3000/health']
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
     deploy:
       replicas: 3
+      # Лимиты/резервы ресурсов — задача не «съест» узел, планировщик знает аппетит.
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 256M
+        reservations:
+          cpus: '0.10'
+          memory: 64M
       restart_policy:
         condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 30s
+      # Обновление без даунтайма: поднять новую задачу, дождаться healthy, затем
+      # погасить старую (start-first). При сбое — автоматический откат.
+      update_config:
+        parallelism: 1
+        delay: 5s
+        order: start-first
+        failure_action: rollback
+        monitor: 15s
+        max_failure_ratio: 0.0
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+        order: start-first
       # В Swarm-режиме Traefik читает labels из deploy.labels (не из верхнего level).
       labels:
         - traefik.enable=true
