@@ -1,0 +1,283 @@
+# Часть 4 (capstone) — полный стек на МНОГОУЗЛОВОМ кластере.
+# = Часть 3 + registry; образ api тянется из registry (доступен всем узлам).
+# Состояние нарастает: step-13 (registry) -> step-14 (placement) -> step-16 (финал).
+#
+# Подготовка (на менеджере кластера, см. главы 12-13):
+#   export REGISTRY=<MANAGER_IP>:5000
+#   docker build -t $REGISTRY/swarm-demo-api:1.0.0 .
+#   docker push $REGISTRY/swarm-demo-api:1.0.0
+#   bash deploy/traefik/certs/generate-cert.sh
+#   cp deploy/secrets/db_password.txt.example deploy/secrets/db_password.txt
+# Деплой:
+#   docker stack deploy -c deploy/stacks/stack.part4.yml part4
+version: '3.9'
+
+services:
+  registry:
+    image: registry:2
+    networks: [appnet]
+    volumes:
+      - registry-data:/var/lib/registry
+    ports:
+      - { target: 5000, published: 5000, mode: ingress }
+    deploy:
+      # Registry держим на менеджере вместе с его данными.
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+
+  api:
+    # Образ из registry — на multi-node иначе worker'ы его не получат.
+    image: ${REGISTRY:-127.0.0.1:5000}/swarm-demo-api:1.0.0
+    networks: [appnet]
+    environment:
+      PORT: '3000'
+      REDIS_URL: 'redis://redis:6379'
+      DB_HOST: 'postgres'
+      DB_PORT: '5432'
+      DB_USER: 'app'
+      DB_NAME: 'appdb'
+      DB_PASSWORD_FILE: '/run/secrets/db_password'
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:3000/health']
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+    configs:
+      - source: app_env
+        target: /app/.env
+    secrets:
+      - source: db_password
+        target: db_password
+    deploy:
+      replicas: 4
+      resources:
+        limits: { cpus: '0.50', memory: 256M }
+        reservations: { cpus: '0.10', memory: 64M }
+      restart_policy:
+        condition: on-failure
+      update_config:
+        parallelism: 1
+        order: start-first
+        failure_action: rollback
+        monitor: 15s
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.api.rule=Host(`localhost`)
+        - traefik.http.routers.api.entrypoints=websecure
+        - traefik.http.routers.api.tls=true
+        - traefik.http.services.api.loadbalancer.server.port=3000
+
+  redis:
+    image: redis:7-alpine
+    networks: [appnet]
+    volumes:
+      - redis-data:/data
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  postgres:
+    image: postgres:16-alpine
+    networks: [appnet]
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_DB: appdb
+      POSTGRES_PASSWORD_FILE: '/run/secrets/db_password'
+    secrets:
+      - source: db_password
+        target: db_password
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  traefik:
+    # v3.6.x: swarm-провайдер корректно договаривается о версии Docker API
+    # (нужно для Docker 28+, где минимальный API 1.40). В v3.1 и в v3.7.x —
+    # баг "client version 1.24 is too old": провайдер не видит сервисы Swarm.
+    image: traefik:v3.6.20
+    command:
+      - --providers.swarm=true
+      - --providers.swarm.endpoint=unix:///var/run/docker.sock
+      - --providers.swarm.exposedByDefault=false
+      - --providers.swarm.network=part4_appnet
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entryPoint.to=websecure
+      - --entrypoints.web.http.redirections.entryPoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.metrics.address=:8082
+      - --metrics.prometheus=true
+      - --metrics.prometheus.entrypoint=metrics
+      - --api.dashboard=true
+      - --api.insecure=true
+      - --log.level=INFO
+    ports:
+      - { target: 80, published: 80, mode: ingress }
+      - { target: 443, published: 443, mode: ingress }
+      - { target: 8080, published: 8080, mode: ingress }
+    networks: [appnet]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    configs:
+      - source: traefik_dynamic
+        target: /etc/traefik/dynamic/tls.yml
+      - source: traefik_cert
+        target: /certs/local.crt
+    secrets:
+      - source: traefik_key
+        target: /certs/local.key
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    networks: [appnet]
+    configs:
+      - source: prometheus_config
+        target: /etc/prometheus/prometheus.yml
+    volumes:
+      - prometheus-data:/prometheus
+    ports:
+      - { target: 9090, published: 9090, mode: ingress }
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    networks: [appnet]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: 'true'
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    configs:
+      - source: grafana_datasources
+        target: /etc/grafana/provisioning/datasources/datasources.yml
+      - source: grafana_dashboards_provider
+        target: /etc/grafana/provisioning/dashboards/dashboards.yml
+      - source: grafana_dashboard_app
+        target: /etc/grafana/dashboards/app-overview.json
+    volumes:
+      - grafana-data:/var/lib/grafana
+    ports:
+      - { target: 3000, published: 3001, mode: ingress }
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    networks: [appnet]
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    deploy:
+      mode: global
+      restart_policy:
+        condition: on-failure
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+    networks: [appnet]
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    deploy:
+      mode: global
+      restart_policy:
+        condition: on-failure
+
+  loki:
+    image: grafana/loki:3.1.1
+    command: ['-config.file=/etc/loki/loki-config.yml']
+    networks: [appnet]
+    configs:
+      - source: loki_config
+        target: /etc/loki/loki-config.yml
+    volumes:
+      - loki-data:/loki
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+
+  promtail:
+    image: grafana/promtail:3.1.1
+    command: ['-config.file=/etc/promtail/promtail-config.yml']
+    networks: [appnet]
+    configs:
+      - source: promtail_config
+        target: /etc/promtail/promtail-config.yml
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    deploy:
+      mode: global
+      restart_policy:
+        condition: on-failure
+
+networks:
+  appnet:
+    driver: overlay
+
+volumes:
+  registry-data:
+  redis-data:
+  pg-data:
+  prometheus-data:
+  grafana-data:
+  loki-data:
+
+configs:
+  app_env:
+    file: ../configs/app.env
+  traefik_dynamic:
+    file: ../traefik/dynamic/tls.yml
+  traefik_cert:
+    file: ../traefik/certs/local.crt
+  prometheus_config:
+    file: ../prometheus/prometheus.yml
+  grafana_datasources:
+    file: ../grafana/provisioning/datasources/datasources.yml
+  grafana_dashboards_provider:
+    file: ../grafana/provisioning/dashboards/dashboards.yml
+  grafana_dashboard_app:
+    file: ../grafana/dashboards/app-overview.json
+  loki_config:
+    file: ../loki/loki-config.yml
+  promtail_config:
+    file: ../loki/promtail-config.yml
+
+secrets:
+  db_password:
+    file: ../secrets/db_password.txt
+  traefik_key:
+    file: ../traefik/certs/local.key
