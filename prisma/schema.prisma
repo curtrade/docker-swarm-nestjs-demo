@@ -1,0 +1,23 @@
+// Prisma schema. URL берётся из переменной окружения DATABASE_URL.
+generator client {
+  provider      = "prisma-client-js"
+  // native — для локальной разработки; musl-openssl-3.0.x — для alpine-образа
+  // (иначе Prisma пытается скачать движок в рантайме под non-root и падает).
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Минимальный ресурс «заметка» — носитель, на котором показываем работу с БД
+// и (в главе 09) безопасную передачу пароля БД через secret.
+model Note {
+  id        String   @id @default(uuid())
+  title     String
+  content   String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("notes")
+}

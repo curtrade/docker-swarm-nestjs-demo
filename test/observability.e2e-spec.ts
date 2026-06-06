@@ -3,14 +3,27 @@ import { Test } from '@nestjs/testing';
 import { hostname } from 'os';
 import * as request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { PrismaService } from '../src/prisma/prisma.service';
 
 describe('Observability (e2e)', () => {
   let app: INestApplication;
 
   beforeAll(async () => {
+    // Этот e2e проверяет endpoint'ы наблюдаемости, а не персистентность.
+    // Подменяем PrismaService заглушкой, чтобы тест не требовал живой БД.
+    const prismaStub = {
+      onModuleInit: jest.fn(),
+      onModuleDestroy: jest.fn(),
+      $connect: jest.fn(),
+      $disconnect: jest.fn(),
+    };
+
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(PrismaService)
+      .useValue(prismaStub)
+      .compile();
     app = moduleRef.createNestApplication();
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
     await app.init();

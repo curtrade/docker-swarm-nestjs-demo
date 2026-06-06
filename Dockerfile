@@ -6,12 +6,18 @@
 FROM node:22-alpine AS builder
 WORKDIR /app
 
-# Сначала только манифесты — слой с зависимостями кэшируется и не
-# пересобирается при правке исходников.
+# Prisma на alpine требует openssl, иначе не определяет libssl и не находит движок.
+RUN apk add --no-cache openssl
+
+# Сначала только манифесты — слой с зависимостями кэшируется.
 COPY package*.json ./
 RUN npm ci
 
-# Затем исходники и компиляция (nest build -> dist/)
+# Prisma-клиент генерируется из схемы ДО компиляции (его типы нужны TS).
+COPY prisma ./prisma
+RUN npx prisma generate
+
+# Затем исходники и компиляция (nest build -> dist/).
 COPY tsconfig*.json nest-cli.json ./
 COPY src ./src
 RUN npm run build
@@ -23,15 +29,27 @@ FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
-# Только production-зависимости — образ меньше и без тулинга сборки.
+# Prisma на alpine требует openssl (для query- и schema-движков в рантайме).
+RUN apk add --no-cache openssl
+
+# Только production-зависимости (prisma и @prisma/client — в dependencies).
 COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
-# Скомпилированный код из стадии сборки.
+# Схема + повторная генерация клиента (node_modules здесь свежие).
+COPY prisma ./prisma
+RUN npx prisma generate
+
+# Скомпилированный код и entrypoint.
 COPY --from=builder /app/dist ./dist
+COPY docker-entrypoint.sh ./
+RUN chmod +x docker-entrypoint.sh
 
-# Запуск под непривилегированным пользователем (есть в официальном образе node).
+# Каталоги Prisma должны принадлежать node: migrate deploy в entrypoint работает
+# под non-root и может потребовать запись (кэш/временные файлы движка).
+RUN chown -R node:node /app/node_modules/.prisma /app/node_modules/@prisma
+
 USER node
-
 EXPOSE 3000
-CMD ["node", "dist/main.js"]
+# Entrypoint применяет миграции, затем запускает приложение.
+ENTRYPOINT ["./docker-entrypoint.sh"]
