@@ -1,0 +1,27 @@
+# dependencies
+/node_modules
+
+# build
+/dist
+*.tsbuildinfo
+
+# test
+/coverage
+
+# logs
+*.log
+npm-debug.log*
+
+# env / secrets (никогда не коммитим)
+.env
+.env.*
+!.env.example
+deploy/**/secrets/*
+*.key
+*.pem
+!deploy/traefik/certs/README.md
+
+# editors / os
+.DS_Store
+.idea
+.vscode

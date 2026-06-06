@@ -1,0 +1,14 @@
+node_modules
+dist
+coverage
+.git
+.gitignore
+*.log
+.env
+.env.*
+docs
+deploy
+test
+.eslintrc.js
+.prettierrc
+README.md
