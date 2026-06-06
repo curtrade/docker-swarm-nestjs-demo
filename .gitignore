@@ -17,6 +17,8 @@ npm-debug.log*
 .env.*
 !.env.example
 deploy/**/secrets/*
+!deploy/secrets/README.md
+!deploy/secrets/*.example
 *.key
 *.pem
 # Сгенерированные сертификаты не коммитим, но скрипт и README — да.
