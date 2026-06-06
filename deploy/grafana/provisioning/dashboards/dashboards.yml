@@ -1,0 +1,11 @@
+# Провайдер дашбордов: Grafana подхватит JSON-файлы из /var/lib/grafana/dashboards.
+apiVersion: 1
+providers:
+  - name: 'swarm-demo'
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /etc/grafana/dashboards

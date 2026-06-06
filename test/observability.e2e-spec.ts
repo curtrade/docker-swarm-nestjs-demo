@@ -44,4 +44,13 @@ describe('Observability (e2e)', () => {
     const res = await request(app.getHttpServer()).get('/health').expect(200);
     expect(res.body).toEqual({ status: 'ok' });
   });
+
+  it('считает ответы с ошибками: 400 валидации попадает в http_requests_total', async () => {
+    // Пустое тело -> ValidationPipe бросает 400 (обработчик запущен -> интерсептор
+    // отработал -> res "finish" зафиксировал статус ошибки).
+    await request(app.getHttpServer()).post('/notes').send({}).expect(400);
+
+    const res = await request(app.getHttpServer()).get('/metrics').expect(200);
+    expect(res.text).toMatch(/http_requests_total\{[^}]*status="400"[^}]*\}/);
+  });
 });
